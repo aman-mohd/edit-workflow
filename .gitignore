@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+.vite/
+dist/
+
+# Electron Forge packaging
+.webpack/
+
+# electron-store encrypted config (contains API keys)
+# Uncomment if you want to exclude user configs from the repo
+# app-config.*
+
+# macOS
+.DS_Store
+*.dmg
+
+# Windows
+Thumbs.db
+*.exe
+*.msi
+*.nupkg
+RELEASES
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.*
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Claude Code memory / plans
+.claude/
+
+# Test scripts
+test-api.mjs
+
+# Bundled CLI binary — downloaded automatically by postinstall
+resources/bin/
