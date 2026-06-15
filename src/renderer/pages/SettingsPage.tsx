@@ -38,13 +38,22 @@ export function SettingsPage(): JSX.Element {
     setAuthStatus('unknown')
     try {
       await window.electronAPI.cliLogin()
-      // After login completes, re-check status
       await checkConnection()
     } catch (e) {
       setAuthStatus('error')
       setAuthDetail(String(e))
     } finally {
       setLoggingIn(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await window.electronAPI.cliLogout()
+      setAuthStatus('error')
+      setAuthDetail('Logged out')
+    } catch (e) {
+      setAuthDetail(String(e))
     }
   }
 
@@ -84,6 +93,15 @@ export function SettingsPage(): JSX.Element {
           >
             {loggingIn ? 'Opening browser…' : 'Login with Higgsfield'}
           </button>
+          {authStatus === 'ok' && (
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
+          )}
           <button
             type="button"
             className="btn-secondary"

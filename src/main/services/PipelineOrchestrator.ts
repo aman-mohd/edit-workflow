@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import * as fs from 'node:fs'
 import { HiggsfieldCLI } from './HiggsfieldCLI'
 import { FileService } from './FileService'
 import type {
@@ -13,6 +14,33 @@ import type {
   PipelineErrorPayload,
 } from '@shared/types'
 
+// Maps lowercased character name → absolute image path
+// e.g. "/path/John.jpg" → { "john": "/path/John.jpg" }
+function buildCharacterMap(imagePaths: string[]): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const p of imagePaths) {
+    if (fs.existsSync(p)) {
+      const name = path.basename(p, path.extname(p)).toLowerCase().trim()
+      map.set(name, p)
+    }
+  }
+  return map
+}
+
+// Returns the subset of image paths relevant to a scene's character list.
+// Falls back to all images if the scene has no characters specified.
+function resolveSceneImages(
+  scene: { characters?: string[] },
+  characterMap: Map<string, string>,
+  allImagePaths: string[]
+): string[] {
+  if (!scene.characters?.length || characterMap.size === 0) return allImagePaths
+  const matched = scene.characters
+    .map((name) => characterMap.get(name.toLowerCase().trim()))
+    .filter((p): p is string => p !== undefined)
+  return matched.length > 0 ? matched : allImagePaths
+}
+
 export interface PipelineCallbacks {
   onProgress: (payload: ProgressPayload) => void
   onSceneImageReady: (payload: SceneImageReadyPayload) => void
@@ -23,6 +51,7 @@ export interface PipelineCallbacks {
 
 export class PipelineOrchestrator {
   private abortFlag = false
+  private projectDir: string | null = null
   private readonly cli: HiggsfieldCLI
   private readonly files: FileService
 
@@ -43,7 +72,7 @@ export class PipelineOrchestrator {
       await this.execute(input)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.callbacks.onError({ message })
+      this.callbacks.onError({ message, outputDir: this.projectDir ?? undefined })
     }
   }
 
@@ -67,17 +96,35 @@ export class PipelineOrchestrator {
 
     this.checkAbort()
 
-    // 2. Create output directory + write storyboard JSON
-    const projectDir = await this.files.createProjectDir(
-      this.settings.outputDirectory,
-      storyboard.title
-    )
-    await this.files.writeJson(path.join(projectDir, 'storyboard.json'), storyboard)
+    // 2. Reuse existing dir on retry, otherwise create a new one
+    const projectDir = input.retryFromDir
+      ?? await this.files.createProjectDir(this.settings.outputDirectory, storyboard.title)
+    this.projectDir = projectDir
 
-    // 3. Process each scene sequentially
+    if (!input.retryFromDir) {
+      await this.files.writeJson(path.join(projectDir, 'storyboard.json'), storyboard)
+    }
+
+    // 3. Build character → image path map from uploaded filenames
+    const characterMap = buildCharacterMap(input.characterImagePaths)
+
+    // 4. Process each scene sequentially, skipping already-completed ones on retry
     for (const scene of storyboard.scenes) {
       this.checkAbort()
-      await this.processScene(scene, input.characterImagePaths, projectDir)
+
+      const imagePath = path.join(projectDir, `${scene.id}_image.jpg`)
+      const videoPath = path.join(projectDir, `${scene.id}_video.mp4`)
+
+      if (fs.existsSync(imagePath) && fs.existsSync(videoPath)) {
+        // Scene already completed in a previous run — restore UI state and skip
+        this.callbacks.onSceneImageReady({ sceneId: scene.id, imagePath })
+        this.callbacks.onSceneVideoReady({ sceneId: scene.id, videoPath })
+        this.emitScene(scene.id, 'complete', 'done', `${scene.id}: already completed`)
+        continue
+      }
+
+      const sceneImages = resolveSceneImages(scene, characterMap, input.characterImagePaths)
+      await this.processScene(scene, sceneImages, projectDir)
     }
 
     this.callbacks.onComplete({ outputDir: projectDir })
@@ -89,41 +136,46 @@ export class PipelineOrchestrator {
     projectDir: string
   ): Promise<void> {
     const { id } = scene
-
-    // --- IMAGE ---
-    this.emitScene(id, 'generating_image', 'started', `${id}: generating image via CLI...`)
-    const imageUrl = await this.cli.generateImage({
-      prompt: scene.image_prompt,
-      modelId: this.settings.higgsfieldImageModelId,
-      referenceImagePaths,
-      aspectRatio: '9:16',
-      resolution: '1k',
-    })
-
-    this.emitScene(id, 'downloading', 'in_progress', `${id}: downloading image`)
     const imagePath = path.join(projectDir, `${id}_image.jpg`)
-    await this.files.downloadFile(imageUrl, imagePath)
-    this.callbacks.onSceneImageReady({ sceneId: id, imagePath })
-    this.emitScene(id, 'generating_image', 'done', `${id}: image saved`)
+    const videoPath = path.join(projectDir, `${id}_video.mp4`)
 
+    // --- IMAGE (skip if already downloaded from a partial retry) ---
+    if (!fs.existsSync(imagePath)) {
+      this.emitScene(id, 'generating_image', 'started', `${id}: generating image via CLI...`)
+      const imageUrl = await this.cli.generateImage({
+        prompt: scene.image_prompt,
+        modelId: this.settings.higgsfieldImageModelId,
+        referenceImagePaths,
+        aspectRatio: '9:16',
+        resolution: '1k',
+      })
+
+      this.emitScene(id, 'downloading', 'in_progress', `${id}: downloading image`)
+      await this.files.downloadFile(imageUrl, imagePath)
+      this.emitScene(id, 'generating_image', 'done', `${id}: image saved`)
+    }
+
+    this.callbacks.onSceneImageReady({ sceneId: id, imagePath })
     this.checkAbort()
 
-    // --- VIDEO (pass the downloaded image file directly to CLI) ---
-    this.emitScene(id, 'generating_video', 'in_progress', `${id}: generating video via CLI...`)
-    const videoUrl = await this.cli.generateVideo({
-      imageFilePath: imagePath,
-      prompt: scene.image_prompt,
-      modelId: this.settings.higgsfieldVideoModelId,
-      aspectRatio: '9:16',
-      duration: 5,
-      resolution: '720p',
-    })
+    // --- VIDEO ---
+    if (!fs.existsSync(videoPath)) {
+      this.emitScene(id, 'generating_video', 'in_progress', `${id}: generating video via CLI...`)
+      const videoUrl = await this.cli.generateVideo({
+        imageFilePath: imagePath,
+        prompt: scene.image_prompt,
+        modelId: this.settings.higgsfieldVideoModelId,
+        aspectRatio: '9:16',
+        duration: 5,
+        resolution: '720p',
+      })
 
-    this.emitScene(id, 'downloading', 'in_progress', `${id}: downloading video`)
-    const videoPath = path.join(projectDir, `${id}_video.mp4`)
-    await this.files.downloadFile(videoUrl, videoPath)
+      this.emitScene(id, 'downloading', 'in_progress', `${id}: downloading video`)
+      await this.files.downloadFile(videoUrl, videoPath)
+      this.emitScene(id, 'generating_video', 'done', `${id}: video saved`)
+    }
+
     this.callbacks.onSceneVideoReady({ sceneId: id, videoPath })
-    this.emitScene(id, 'generating_video', 'done', `${id}: video saved`)
   }
 
   private emit(

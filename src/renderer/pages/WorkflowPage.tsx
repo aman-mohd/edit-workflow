@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { usePipeline, SceneState } from '../hooks/usePipeline'
 
 const PROMPT_TEMPLATE = `Break the script below into a visual storyboard and return ONLY valid JSON — no markdown, no explanation — matching this exact structure:
@@ -10,15 +10,18 @@ const PROMPT_TEMPLATE = `Break the script below into a visual storyboard and ret
       "id": "scene_01",
       "narration": "exact spoken or on-screen text for this scene",
       "visual_description": "camera angle, lighting mood, subject positioning, background",
-      "image_prompt": "detailed AI image prompt (max 200 words): describe subject appearance physically (no character names), action/pose, setting, lighting style, camera lens, mood/color palette. Must be fully self-contained with no references to other scenes. Include shot type (close-up, wide shot, etc.)."
+      "characters": ["CharacterName1", "CharacterName2"],
+      "image_prompt": "detailed AI image prompt (max 200 words): describe each character's physical appearance (no character names in the prompt — describe them physically), action/pose, setting, lighting style, camera lens, mood/color palette. Must be fully self-contained with no references to other scenes. Include shot type (close-up, wide shot, etc.)."
     }
   ]
 }
 
 Rules:
 - Split at natural visual cuts (aim for 4–12 scenes)
+- "characters" must list exactly the character names that appear in that scene (use the exact same spelling as the character reference image filenames you were given)
 - Each image_prompt must stand alone — never write "as seen before" or "same as scene X"
-- Describe the subject physically in every image_prompt (reference images will be provided separately)
+- Describe each character physically in every image_prompt (reference images will be provided separately for consistency)
+- If a scene has no characters (e.g. a title card or landscape shot), use an empty array: "characters": []
 
 Script:
 [PASTE YOUR SCRIPT HERE]`
@@ -37,14 +40,14 @@ function SceneCard({ scene }: { scene: SceneState }): JSX.Element {
       <div className="scene-media">
         {scene.imagePath && (
           <img
-            src={`file://${scene.imagePath}`}
+            src={`localfile://${scene.imagePath}`}
             alt={`${scene.sceneId} preview`}
             className="scene-thumbnail"
           />
         )}
         {scene.videoPath && (
           <video className="scene-video" controls width={240}>
-            <source src={`file://${scene.videoPath}`} type="video/mp4" />
+            <source src={`localfile://${scene.videoPath}`} type="video/mp4" />
           </video>
         )}
       </div>
@@ -56,8 +59,35 @@ export function WorkflowPage(): JSX.Element {
   const [storyboardJson, setStoryboardJson] = useState('')
   const [charImages, setCharImages] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
-  const { running, scenes, globalMessage, outputDir, error, start, abort } = usePipeline()
+  const { running, scenes, globalMessage, outputDir, error, retryDir, start, retry, abort } = usePipeline()
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null)
+
+  // Start a 3-second countdown whenever a retryable failure occurs
+  useEffect(() => {
+    if (error && retryDir) {
+      setRetryCountdown(3)
+    } else {
+      setRetryCountdown(null)
+    }
+  }, [error, retryDir])
+
+  // Tick the countdown down and auto-fire retry at 0
+  useEffect(() => {
+    if (retryCountdown === null) return
+    if (retryCountdown === 0) {
+      retry()
+      return
+    }
+    const timer = setTimeout(() => setRetryCountdown((c) => (c !== null ? c - 1 : null)), 1000)
+    return () => clearTimeout(timer)
+  }, [retryCountdown, retry])
+
+  const handleManualRetry = () => {
+    setRetryCountdown(null)
+    retry()
+  }
 
   const handleJsonChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
@@ -77,15 +107,26 @@ export function WorkflowPage(): JSX.Element {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const paths = Array.from(e.dataTransfer.files)
+  const addImageFiles = useCallback((files: FileList | File[]) => {
+    const paths = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
       .map((f) => window.electronAPI.getPathForFile(f))
       .filter((p): p is string => typeof p === 'string' && p.length > 0)
     setCharImages((prev) => [...new Set([...prev, ...paths])])
   }, [])
+
+  const handleImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    addImageFiles(e.dataTransfer.files)
+  }, [addImageFiles])
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      addImageFiles(e.target.files)
+      e.target.value = ''
+    }
+  }, [addImageFiles])
 
   const removeImage = (index: number) => {
     setCharImages((prev) => prev.filter((_, i) => i !== index))
@@ -125,29 +166,43 @@ export function WorkflowPage(): JSX.Element {
 
         <section className="input-section">
           <h2>Character Reference Images</h2>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFileInputChange}
+          />
           <div
             className={`drop-zone ${running ? 'disabled' : ''}`}
             onDrop={running ? undefined : handleImageDrop}
             onDragOver={(e) => e.preventDefault()}
+            onClick={() => !running && fileInputRef.current?.click()}
           >
-            <span>Drag and drop reference images here</span>
+            <span>Click or drag and drop reference images here</span>
             <span className="hint">(JPG, PNG, WebP — used for character consistency)</span>
           </div>
 
           {charImages.length > 0 && (
             <ul className="image-list">
-              {charImages.map((p, i) => (
-                <li key={p}>
-                  <span className="image-name">{p.split('/').pop()}</span>
-                  <button
-                    className="btn-remove"
-                    onClick={() => removeImage(i)}
-                    disabled={running}
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
+              {charImages.map((p, i) => {
+                const filename = p.split('/').pop() ?? p
+                const charName = filename.replace(/\.[^.]+$/, '')
+                return (
+                  <li key={p}>
+                    <span className="char-name">{charName}</span>
+                    <span className="image-name">{filename}</span>
+                    <button
+                      className="btn-remove"
+                      onClick={() => removeImage(i)}
+                      disabled={running}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
@@ -165,6 +220,12 @@ export function WorkflowPage(): JSX.Element {
         {running && (
           <button className="btn-abort" onClick={abort}>
             Abort
+          </button>
+        )}
+
+        {!running && error && retryDir && (
+          <button className="btn-retry" onClick={handleManualRetry}>
+            Retry from failure {retryCountdown !== null ? `(${retryCountdown})` : ''}
           </button>
         )}
       </div>

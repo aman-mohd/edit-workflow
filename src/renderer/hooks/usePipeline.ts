@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { PipelineInput, ProgressPayload } from '../../shared/types'
 import { IPC_CHANNELS } from '../../main/ipc/channels'
 
@@ -17,6 +17,10 @@ export function usePipeline() {
   const [globalMessage, setGlobalMessage] = useState('')
   const [outputDir, setOutputDir] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [retryDir, setRetryDir] = useState<string | null>(null)
+
+  // Keep latest input around so retry can reuse it without the caller passing it again
+  const lastInputRef = useRef<Omit<PipelineInput, 'retryFromDir'> | null>(null)
 
   useEffect(() => {
     window.electronAPI.onProgress((p: ProgressPayload) => {
@@ -52,12 +56,14 @@ export function usePipeline() {
     window.electronAPI.onComplete(({ outputDir: dir }) => {
       setRunning(false)
       setOutputDir(dir)
+      setRetryDir(null)
       setGlobalMessage('Pipeline complete.')
     })
 
-    window.electronAPI.onError(({ message }) => {
+    window.electronAPI.onError(({ message, outputDir: partialDir }) => {
       setRunning(false)
       setError(message)
+      if (partialDir) setRetryDir(partialDir)
     })
 
     return () => {
@@ -70,13 +76,25 @@ export function usePipeline() {
   }, [])
 
   const start = useCallback(async (input: PipelineInput) => {
+    lastInputRef.current = { storyboardJson: input.storyboardJson, characterImagePaths: input.characterImagePaths }
     setRunning(true)
     setScenes({})
     setOutputDir(null)
+    setRetryDir(null)
     setError(null)
     setGlobalMessage('')
     await window.electronAPI.startPipeline(input)
   }, [])
+
+  const retry = useCallback(async () => {
+    if (!retryDir || !lastInputRef.current) return
+    setRunning(true)
+    setError(null)
+    setGlobalMessage('')
+    // Keep existing scene cards — the orchestrator will restore completed ones and
+    // clear the failed one as it re-runs it
+    await window.electronAPI.startPipeline({ ...lastInputRef.current, retryFromDir: retryDir })
+  }, [retryDir])
 
   const abort = useCallback(async () => {
     await window.electronAPI.abortPipeline()
@@ -84,5 +102,5 @@ export function usePipeline() {
     setGlobalMessage('Aborted.')
   }, [])
 
-  return { running, scenes, globalMessage, outputDir, error, start, abort }
+  return { running, scenes, globalMessage, outputDir, error, retryDir, start, retry, abort }
 }

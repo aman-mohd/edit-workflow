@@ -58,6 +58,11 @@ export function registerIpcHandlers(win: BrowserWindow): void {
     await cli.login()
   })
 
+  ipcMain.handle(IPC_CHANNELS.CLI_LOGOUT, async (): Promise<void> => {
+    const cli = new HiggsfieldCLI()
+    await cli.logout()
+  })
+
   ipcMain.handle(
     IPC_CHANNELS.TEST_CONNECTION,
     async (): Promise<{ upload: string; generate: string }> => {

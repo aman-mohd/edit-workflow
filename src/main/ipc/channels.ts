@@ -11,6 +11,7 @@ export const IPC_CHANNELS = {
   SCENE_VIDEO_READY: 'scene:videoReady',
   TEST_CONNECTION: 'higgsfield:testConnection',
   CLI_LOGIN: 'higgsfield:cliLogin',
+  CLI_LOGOUT: 'higgsfield:cliLogout',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]

@@ -30,10 +30,24 @@ function bundledBinPath(): string {
   return ''
 }
 
+async function clearQuarantineIfNeeded(binPath: string): Promise<void> {
+  if (process.platform !== 'darwin') return
+  try {
+    // Downloaded apps carry com.apple.quarantine on everything inside them.
+    // Clearing it here lets macOS execute the binary without Gatekeeper blocking it.
+    await execFileAsync('xattr', ['-d', 'com.apple.quarantine', binPath])
+  } catch {
+    // Attribute may not exist — that's fine
+  }
+}
+
 async function findBinary(): Promise<string> {
   // 1. Bundled binary (ships inside the app)
   const bundled = bundledBinPath()
-  if (bundled) return bundled
+  if (bundled) {
+    await clearQuarantineIfNeeded(bundled)
+    return bundled
+  }
 
   // 2. System-installed fallback
   const env = buildEnv()
@@ -69,6 +83,11 @@ export class HiggsfieldCLI {
     const bin = await this.getBin()
     // auth login opens a browser and blocks until the user completes OAuth
     await execFileAsync(bin, ['auth', 'login'], { env: buildEnv(), timeout: 300_000 })
+  }
+
+  async logout(): Promise<void> {
+    const bin = await this.getBin()
+    await execFileAsync(bin, ['auth', 'logout'], { env: buildEnv(), timeout: 30_000 })
   }
 
   async checkInstalled(): Promise<{ ok: boolean; version?: string; error?: string }> {
@@ -119,7 +138,7 @@ export class HiggsfieldCLI {
       '--start-image', params.imageFilePath,
       '--aspect_ratio', params.aspectRatio ?? '9:16',
       '--duration', String(params.duration ?? 5),
-      '--resolution', params.resolution ?? '720p',
+      // '--resolution', params.resolution ?? '720p',
       '--wait', '--json',
     ]
 
@@ -156,9 +175,12 @@ export class HiggsfieldCLI {
     }
 
     const data = JSON.parse(jsonMatch[0]) as GenerateResult
-    const url =
-      data.result_url ??
-      data.result_urls?.[0]
+
+    if (data.status === 'failed') {
+      throw new Error(`Higgsfield job failed (id: ${data.id ?? 'unknown'})`)
+    }
+
+    const url = data.result_url || data.result_urls?.[0]
 
     if (!url) {
       throw new Error(

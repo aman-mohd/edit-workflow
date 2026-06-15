@@ -48,7 +48,7 @@ export class HiggsfieldClient {
       const r = await this.apiFetch<SubmitResponse>('POST', '/higgsfield-ai/soul/standard', {
         prompt: 'test',
         aspect_ratio: '1:1',
-        resolution: '720p',
+        mode: 'std',
       })
       generate = r.request_id ? `OK — request_id: ${r.request_id}` : `OK — ${JSON.stringify(r)}`
     } catch (e) {

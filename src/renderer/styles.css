@@ -248,6 +248,22 @@ input[type="password"]:focus {
   background: var(--border);
 }
 
+.btn-danger {
+  background: transparent;
+  border: 1px solid #f44336;
+  border-radius: var(--radius);
+  color: #f44336;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 8px 16px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-danger:hover {
+  background: #f44336;
+  color: #fff;
+}
+
 .btn-abort {
   background: transparent;
   border: 1px solid var(--error);
@@ -262,6 +278,22 @@ input[type="password"]:focus {
 
 .btn-abort:hover {
   background: rgba(255, 92, 92, 0.1);
+}
+
+.btn-retry {
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 10px 20px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.btn-retry:hover {
+  background: rgba(91, 127, 255, 0.1);
 }
 
 .btn-remove {
@@ -361,6 +393,7 @@ input[type="password"]:focus {
   border: 2px dashed var(--border);
   border-radius: var(--radius);
   color: var(--text-muted);
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -370,6 +403,10 @@ input[type="password"]:focus {
   padding: 24px;
   text-align: center;
   transition: border-color 0.15s, background 0.15s;
+}
+
+.drop-zone.disabled {
+  cursor: default;
 }
 
 .drop-zone:not(.disabled):hover {
@@ -394,8 +431,25 @@ input[type="password"]:focus {
   border-radius: 6px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   padding: 6px 10px;
+}
+
+.char-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.image-list li .image-name {
+  flex: 1;
+  margin-left: 0;
+}
+
+.image-list li .btn-remove {
+  margin-left: auto;
 }
 
 .image-name {

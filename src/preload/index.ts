@@ -54,4 +54,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.TEST_CONNECTION),
 
   cliLogin: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.CLI_LOGIN),
+
+  cliLogout: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.CLI_LOGOUT),
 })

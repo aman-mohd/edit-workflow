@@ -25,6 +25,7 @@ declare global {
       getPathForFile: (file: File) => string
       testConnection: () => Promise<{ upload: string; generate: string }>
       cliLogin: () => Promise<void>
+      cliLogout: () => Promise<void>
     }
   }
 }

@@ -8,13 +8,16 @@ import { MakerZIP } from '@electron-forge/maker-zip'
 // electron-forge then packages that output.
 
 const config: ForgeConfig = {
+  outDir: 'dist-app',
   packagerConfig: {
     name: 'VideoEditorTool',
     executableName: 'video-editor-tool',
     icon: './resources/icons/icon',
     asar: true,
-    // Ship resources/bin/ (bundled hf binary) as an extraResource
     extraResource: ['./resources/bin'],
+    osxSign: {
+      identity: '-',
+    },
     ignore: [
       /^\/src\//,
       /^\/\.vite\//,
