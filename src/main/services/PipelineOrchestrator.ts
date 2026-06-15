@@ -2,6 +2,7 @@ import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { HiggsfieldCLI } from './HiggsfieldCLI'
 import { FileService } from './FileService'
+import { findImageModel, findVideoModel } from '@shared/models'
 import type {
   AppSettings,
   PipelineInput,
@@ -127,7 +128,21 @@ export class PipelineOrchestrator {
 
     this.checkAbort()
 
-    // 2. Reuse existing dir on retry, otherwise create a new one
+    // 2. Get model definitions and build final params (defaults + overrides)
+    const imageModel = findImageModel(this.settings.higgsfieldImageModelId)
+    const videoModel = findVideoModel(this.settings.higgsfieldVideoModelId)
+
+    if (!imageModel) {
+      throw new Error(`Image model not found: ${this.settings.higgsfieldImageModelId}`)
+    }
+    if (!videoModel) {
+      throw new Error(`Video model not found: ${this.settings.higgsfieldVideoModelId}`)
+    }
+
+    const imageParams = { ...imageModel.payload, ...input.imageModelParams }
+    const videoParams = { ...videoModel.payload, ...input.videoModelParams }
+
+    // 3. Reuse existing dir on retry, otherwise create a new one
     const projectDir = input.retryFromDir
       ?? await this.files.createProjectDir(this.settings.outputDirectory, storyboard.title)
     this.projectDir = projectDir
@@ -136,10 +151,10 @@ export class PipelineOrchestrator {
       await this.files.writeJson(path.join(projectDir, 'storyboard.json'), storyboard)
     }
 
-    // 3. Build character → image path map from uploaded filenames
+    // 4. Build character → image path map from uploaded filenames
     const characterMap = buildCharacterMap(input.characterImagePaths)
 
-    // 4. Process each scene sequentially, skipping already-completed ones on retry
+    // 5. Process each scene sequentially, skipping already-completed ones on retry
     for (const scene of storyboard.scenes) {
       this.checkAbort()
 
@@ -155,7 +170,7 @@ export class PipelineOrchestrator {
       }
 
       const sceneImages = resolveSceneImages(scene, characterMap, input.characterImagePaths)
-      await this.processScene(scene, sceneImages, projectDir, characterMap)
+      await this.processScene(scene, sceneImages, projectDir, characterMap, imageParams, videoParams)
     }
 
     this.callbacks.onComplete({ outputDir: projectDir })
@@ -165,7 +180,9 @@ export class PipelineOrchestrator {
     scene: SceneData,
     referenceImagePaths: string[],
     projectDir: string,
-    characterMap: Map<string, string>
+    characterMap: Map<string, string>,
+    imageParams: Record<string, unknown>,
+    videoParams: Record<string, unknown>
   ): Promise<void> {
     const { id } = scene
     const imagePath = path.join(projectDir, `${id}_image.jpg`)
@@ -179,8 +196,7 @@ export class PipelineOrchestrator {
         prompt: finalPrompt,
         modelId: this.settings.higgsfieldImageModelId,
         referenceImagePaths,
-        aspectRatio: '9:16',
-        resolution: '1k',
+        extraParams: imageParams,
       })
 
       this.emitScene(id, 'downloading', 'in_progress', `${id}: downloading image`)
@@ -198,9 +214,7 @@ export class PipelineOrchestrator {
         imageFilePath: imagePath,
         prompt: scene.image_prompt,
         modelId: this.settings.higgsfieldVideoModelId,
-        aspectRatio: '9:16',
-        duration: 5,
-        resolution: '720p',
+        extraParams: videoParams,
       })
 
       this.emitScene(id, 'downloading', 'in_progress', `${id}: downloading video`)

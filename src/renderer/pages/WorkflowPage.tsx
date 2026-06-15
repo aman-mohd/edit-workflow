@@ -1,5 +1,61 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { usePipeline, SceneState } from '../hooks/usePipeline'
+import { useSettings } from '../hooks/useSettings'
+import { findImageModel, findVideoModel, RESERVED_FIELDS } from '../../shared/models'
+
+function renderGenerationControls(
+  modelLabel: string,
+  modelId: string,
+  params: Record<string, unknown>,
+  setParams: (p: Record<string, unknown>) => void
+): JSX.Element {
+  const model = modelLabel.includes('Image') ? findImageModel(modelId) : findVideoModel(modelId)
+  if (!model) return <div />
+
+  const controls = Object.entries(model.fields)
+    .filter(([key]) => !RESERVED_FIELDS.has(key))
+    .map(([fieldKey, field]) => {
+      if (field.type === 'select' && field.values) {
+        return (
+          <div key={fieldKey} className="control-group">
+            <label>{fieldKey}</label>
+            <select
+              value={String(params[fieldKey] ?? '')}
+              onChange={(e) => setParams({ ...params, [fieldKey]: e.target.value })}
+            >
+              {field.values.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </div>
+        )
+      } else if (field.type === 'number') {
+        return (
+          <div key={fieldKey} className="control-group">
+            <label>{fieldKey}</label>
+            <input
+              type="number"
+              min={field.min ?? 1}
+              value={String(params[fieldKey] ?? '')}
+              onChange={(e) => setParams({ ...params, [fieldKey]: Number(e.target.value) })}
+            />
+          </div>
+        )
+      }
+      return null
+    })
+
+  return controls.length > 0 ? (
+    <fieldset>
+      <legend>{modelLabel}</legend>
+      <div className="control-row">{controls}</div>
+    </fieldset>
+  ) : (
+    <div />
+  )
+}
 
 const PROMPT_TEMPLATE = `Break the script below into a visual storyboard and return ONLY valid JSON — no markdown, no explanation — matching this exact structure:
 
@@ -11,16 +67,16 @@ const PROMPT_TEMPLATE = `Break the script below into a visual storyboard and ret
       "narration": "exact spoken or on-screen text for this scene",
       "visual_description": "camera angle, lighting mood, subject positioning, background",
       "characters": ["CharacterName1", "CharacterName2"],
-      "image_prompt": "detailed AI image prompt (max 200 words): describe each character's physical appearance (no character names in the prompt — describe them physically), action/pose, setting, lighting style, camera lens, mood/color palette. Must be fully self-contained with no references to other scenes. Include shot type (close-up, wide shot, etc.)."
+      "image_prompt": "detailed AI image prompt (max 200 words): don't describe character's physical appearance, only the action/pose, setting, lighting style, camera lens, mood/color palette, also charcter must always be referenced by name so there is no confusion that means we don't want to give the image style caroonish or animated or comic etc we strictly want to follow the style from the referenced image. Must be fully self-contained with no references to other scenes. Include shot type (close-up, wide shot, etc.)."
     }
   ]
 }
 
 Rules:
-- Split at natural visual cuts (aim for 4–12 scenes)
+- Split at natural visual cuts
 - "characters" must list exactly the character names that appear in that scene (use the exact same spelling as the character reference image filenames you were given)
 - Each image_prompt must stand alone — never write "as seen before" or "same as scene X"
-- Describe each character physically in every image_prompt (reference images will be provided separately for consistency)
+- Describe each character physically in every image_prompt (use reference images that will be provided separately for consistency)
 - If a scene has no characters (e.g. a title card or landscape shot), use an empty array: "characters": []
 
 Script:
@@ -62,7 +118,18 @@ export function WorkflowPage(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const { running, scenes, globalMessage, outputDir, error, retryDir, start, retry, abort } = usePipeline()
+  const { settings } = useSettings()
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null)
+  const [imageParams, setImageParams] = useState<Record<string, unknown>>({})
+  const [videoParams, setVideoParams] = useState<Record<string, unknown>>({})
+
+  // Initialize generation params from model defaults whenever model selection changes
+  useEffect(() => {
+    const imageModel = findImageModel(settings.higgsfieldImageModelId)
+    const videoModel = findVideoModel(settings.higgsfieldVideoModelId)
+    if (imageModel) setImageParams({ ...imageModel.payload })
+    if (videoModel) setVideoParams({ ...videoModel.payload })
+  }, [settings.higgsfieldImageModelId, settings.higgsfieldVideoModelId])
 
   // Start a 3-second countdown whenever a retryable failure occurs
   useEffect(() => {
@@ -133,7 +200,7 @@ export function WorkflowPage(): JSX.Element {
   }
 
   const handleStart = async () => {
-    await start({ storyboardJson, characterImagePaths: charImages })
+    await start({ storyboardJson, characterImagePaths: charImages, imageModelParams: imageParams, videoModelParams: videoParams })
   }
 
   const canStart = !running && storyboardJson.trim().length > 0 && !jsonError
@@ -206,6 +273,12 @@ export function WorkflowPage(): JSX.Element {
             </ul>
           )}
         </section>
+      </div>
+
+      <div className="generation-settings">
+        <h3>Generation Settings</h3>
+        {renderGenerationControls('Image Model', settings.higgsfieldImageModelId, imageParams, setImageParams)}
+        {renderGenerationControls('Video Model', settings.higgsfieldVideoModelId, videoParams, setVideoParams)}
       </div>
 
       <div className="workflow-actions">

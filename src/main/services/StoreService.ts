@@ -11,7 +11,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   higgsfieldApiKey: '',
   higgsfieldApiKeySecret: '',
   outputDirectory: '',
-  higgsfieldImageModelId: 'nano_banana_2',
+  higgsfieldImageModelId: 'cinematic_studio_2_5',
   higgsfieldVideoModelId: 'seedance_2_0',
 }
 

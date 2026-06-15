@@ -5,6 +5,19 @@ import * as path from 'node:path'
 
 const execFileAsync = promisify(execFile)
 
+const RESERVED_FIELDS = new Set(['prompt', 'image', 'start_image', 'end_image'])
+
+function buildExtraArgs(params: Record<string, unknown>): string[] {
+  const args: string[] = []
+  for (const [key, value] of Object.entries(params)) {
+    if (RESERVED_FIELDS.has(key) || value === undefined || value === null) continue
+    // Convert camelCase/snake_case to --flag-name format
+    const flag = `--${key.replace(/_/g, '_')}`
+    args.push(flag, String(value))
+  }
+  return args
+}
+
 function buildEnv(): NodeJS.ProcessEnv {
   const extra = [
     '/usr/local/bin', '/opt/homebrew/bin',
@@ -102,46 +115,44 @@ export class HiggsfieldCLI {
 
   async generateImage(params: {
     prompt: string
-    modelId: string             // e.g. 'nano_banana_2'
+    modelId: string
     referenceImagePaths?: string[]
-    aspectRatio?: string        // e.g. '9:16'
-    resolution?: string         // e.g. '1k'
+    extraParams?: Record<string, unknown>
   }): Promise<string> {
     const bin = await this.getBin()
-    const args = [
-      'generate', 'create', params.modelId,
-      '--prompt', params.prompt,
-      '--aspect_ratio', params.aspectRatio ?? '9:16',
-      '--resolution', params.resolution ?? '1k',
-      '--wait', '--json',
-    ]
+    const args = ['generate', 'create', params.modelId, '--prompt', params.prompt]
 
+    // Add extra params (aspect_ratio, resolution, etc.)
+    const extra = buildExtraArgs(params.extraParams ?? {})
+    args.push(...extra)
+
+    // Add reference images
     for (const imgPath of params.referenceImagePaths ?? []) {
       args.push('--image', imgPath)
     }
 
+    args.push('--wait', '--json')
     return this.runAndExtractUrl(bin, args)
   }
 
   async generateVideo(params: {
     imageFilePath: string
     prompt: string
-    modelId: string             // e.g. 'seedance_2_0'
-    aspectRatio?: string
-    duration?: number
-    resolution?: string
+    modelId: string
+    extraParams?: Record<string, unknown>
   }): Promise<string> {
     const bin = await this.getBin()
     const args = [
       'generate', 'create', params.modelId,
       '--prompt', params.prompt,
       '--start-image', params.imageFilePath,
-      '--aspect_ratio', params.aspectRatio ?? '9:16',
-      '--duration', String(params.duration ?? 5),
-      // '--resolution', params.resolution ?? '720p',
-      '--wait', '--json',
     ]
 
+    // Add extra params (aspect_ratio, duration, mode, etc.)
+    const extra = buildExtraArgs(params.extraParams ?? {})
+    args.push(...extra)
+
+    args.push('--wait', '--json')
     return this.runAndExtractUrl(bin, args)
   }
 

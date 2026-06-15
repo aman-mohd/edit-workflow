@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useSettings } from '../hooks/useSettings'
+import { IMAGE_MODELS, VIDEO_MODELS } from '../../shared/models'
 import type { AppSettings } from '../../shared/types'
 
 type AuthStatus = 'unknown' | 'checking' | 'ok' | 'error'
@@ -132,23 +133,31 @@ export function SettingsPage(): JSX.Element {
         <div className="field-row">
           <div className="field-group">
             <label htmlFor="image-model">Image Model</label>
-            <input
+            <select
               id="image-model"
-              type="text"
               value={settings.higgsfieldImageModelId}
-              onChange={update('higgsfieldImageModelId')}
-              placeholder="nano_banana_2"
-            />
+              onChange={(e) => setSettings((s) => ({ ...s, higgsfieldImageModelId: e.target.value }))}
+            >
+              {IMAGE_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field-group">
             <label htmlFor="video-model">Video Model</label>
-            <input
+            <select
               id="video-model"
-              type="text"
               value={settings.higgsfieldVideoModelId}
-              onChange={update('higgsfieldVideoModelId')}
-              placeholder="seedance_2_0"
-            />
+              onChange={(e) => setSettings((s) => ({ ...s, higgsfieldVideoModelId: e.target.value }))}
+            >
+              {VIDEO_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

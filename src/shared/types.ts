@@ -10,6 +10,8 @@ export interface PipelineInput {
   storyboardJson: string
   characterImagePaths: string[]
   retryFromDir?: string  // if set, reuse this output dir and skip already-completed scenes
+  imageModelParams?: Record<string, unknown>  // dynamic params for image generation (e.g. resolution, quality)
+  videoModelParams?: Record<string, unknown>  // dynamic params for video generation (e.g. duration, mode)
 }
 
 export type PipelineStage =
