@@ -41,6 +41,37 @@ function resolveSceneImages(
   return matched.length > 0 ? matched : allImagePaths
 }
 
+// Rewrites prompt to enforce character consistency with reference images.
+// If references exist, strips appearance details and appends instruction to match them.
+function rewritePromptForConsistency(
+  prompt: string,
+  sceneCharacters: string[] | undefined,
+  characterMap: Map<string, string>
+): string {
+  if (!sceneCharacters?.length) return prompt
+
+  // Check if any characters have references
+  const withReferences = sceneCharacters.filter((c) =>
+    characterMap.has(c.toLowerCase().trim())
+  )
+  if (withReferences.length === 0) return prompt
+
+  // Strip appearance details (patterns: hair, skin tone, build, clothing, etc.)
+  let rewritten = prompt
+    .replace(
+      /\b(hair|skin tone|skin|build|athletic|tall|short|stocky|clothing|jacket|shirt|jeans|shoes|coat|pants|dress|vest|eyes|facial|features|complexion|appearance|wears|wear|dressed|brown hair|blonde|black hair)\b[^.]*?(?=[.;,]|$)/gi,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  // Append reference instruction
+  const names = withReferences.join(' and ')
+  rewritten += ` Character(s) ${names} appearance must match the provided reference images exactly.`
+
+  return rewritten
+}
+
 export interface PipelineCallbacks {
   onProgress: (payload: ProgressPayload) => void
   onSceneImageReady: (payload: SceneImageReadyPayload) => void
@@ -124,7 +155,7 @@ export class PipelineOrchestrator {
       }
 
       const sceneImages = resolveSceneImages(scene, characterMap, input.characterImagePaths)
-      await this.processScene(scene, sceneImages, projectDir)
+      await this.processScene(scene, sceneImages, projectDir, characterMap)
     }
 
     this.callbacks.onComplete({ outputDir: projectDir })
@@ -133,7 +164,8 @@ export class PipelineOrchestrator {
   private async processScene(
     scene: SceneData,
     referenceImagePaths: string[],
-    projectDir: string
+    projectDir: string,
+    characterMap: Map<string, string>
   ): Promise<void> {
     const { id } = scene
     const imagePath = path.join(projectDir, `${id}_image.jpg`)
@@ -142,8 +174,9 @@ export class PipelineOrchestrator {
     // --- IMAGE (skip if already downloaded from a partial retry) ---
     if (!fs.existsSync(imagePath)) {
       this.emitScene(id, 'generating_image', 'started', `${id}: generating image via CLI...`)
+      const finalPrompt = rewritePromptForConsistency(scene.image_prompt, scene.characters, characterMap)
       const imageUrl = await this.cli.generateImage({
-        prompt: scene.image_prompt,
+        prompt: finalPrompt,
         modelId: this.settings.higgsfieldImageModelId,
         referenceImagePaths,
         aspectRatio: '9:16',
